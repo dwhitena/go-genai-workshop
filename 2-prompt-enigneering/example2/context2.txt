@@ -1,0 +1,5 @@
+Each CPU has its own L1 and L2 cache, and the L3 cache is shared among all CPUs. When the data finally makes its way inside the L1 or L2 cache, the processor can access it for execution purposes. On Intel architectures the L3 cache maintains a copy of what is in L1 and L2.
+
+Performance in the end is about how efficiently data can flow into the processor. As you can see from the diagram, main memory access is about 80 times slower than accessing the L1 cache since the data needs to be moved and copied.
+
+(from the Ardan Labs blog, https://www.ardanlabs.com/blog/2023/07/getting-friendly-with-cpu-caches.html)
