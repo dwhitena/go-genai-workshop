@@ -2,3 +2,5 @@ github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/predictionguard/go-client v0.4.0 h1:+Cc7+J9d2IF3LyUVm8nA9fh7nJvlzjIl5BYPrgEPnwU=
 github.com/predictionguard/go-client v0.4.0/go.mod h1:utsh7oH+Bsv1sYadTovIyouIPaV0Eu5D8ogkHmgCesE=
+github.com/predictionguard/go-client v0.13.0 h1:7KJn5eX29LVJ+6gmZuAqBo4IL325KiwpiI29kL9GMbc=
+github.com/predictionguard/go-client v0.13.0/go.mod h1:utsh7oH+Bsv1sYadTovIyouIPaV0Eu5D8ogkHmgCesE=

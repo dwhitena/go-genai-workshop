@@ -18,9 +18,7 @@ var apiKey = os.Getenv("PGKEY")
 
 // qAPromptTemplate is a template for a question and answer prompt.
 func qAPromptTemplate(context, question string) string {
-	return fmt.Sprintf(`Read the context below and answer the question. If the question cannot be answered based on the context alone or the context does not explicitly say the answer to the question, respond "Sorry I had trouble answering this question, based on the information I found."
-
-Context: "%s"
+	return fmt.Sprintf(`Context: "%s"
 
 Question: "%s"
 `, context, question)
@@ -41,19 +39,28 @@ func run(query, queryContext string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	input := []client.ChatMessage{
-		{
-			Role: client.Roles.User,
-			Content: qAPromptTemplate(
-				string(queryContext),
-				query,
-			),
+	input := client.ChatSSEInput{
+		Model: client.Models.Hermes2ProLlama38B,
+		Messages: []client.ChatInputMessage{
+			{
+				Role:    client.Roles.System,
+				Content: "Read the context provided by the user and answer their question. If the question cannot be answered based on the context alone or the context does not explicitly say the answer to the question, respond \"Sorry I had trouble answering this question, based on the information I found\".",
+			},
+			{
+				Role: client.Roles.User,
+				Content: qAPromptTemplate(
+					string(queryContext),
+					query,
+				),
+			},
 		},
+		MaxTokens:   1000,
+		Temperature: 0.3,
 	}
 
 	ch := make(chan client.ChatSSE, 1000)
 
-	err := cln.ChatSSE(ctx, client.Models.Hermes2ProMistral7B, input, 1000, 0.1, ch)
+	err := cln.ChatSSE(ctx, input, ch)
 	if err != nil {
 		return fmt.Errorf("ERROR: %w", err)
 	}

@@ -33,14 +33,23 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	input := []client.ChatMessage{
-		{
-			Role:    client.Roles.User,
-			Content: "Write a Go program that prints out random numbers.",
+	input := client.ChatInput{
+		Model: client.Models.Hermes2ProLlama38B,
+		Messages: []client.ChatInputMessage{
+			{
+				Role:    client.Roles.System,
+				Content: "You are a helpful coding assistant.",
+			},
+			{
+				Role:    client.Roles.User,
+				Content: "Write a Go program that prints out random numbers.",
+			},
 		},
+		MaxTokens:   1000,
+		Temperature: 0.3,
 	}
 
-	resp, err := cln.Chat(ctx, client.Models.Hermes2ProMistral7B, input, 1000, 0.1)
+	resp, err := cln.Chat(ctx, input)
 	if err != nil {
 		return fmt.Errorf("ERROR: %w", err)
 	}

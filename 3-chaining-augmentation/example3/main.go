@@ -1,36 +1,72 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
 	"os"
+	"time"
 
-	cohere "github.com/cohere-ai/cohere-go"
+	"github.com/predictionguard/go-client"
 )
 
-// embed vectorizes a user message/query.
-func embed(message string, co *cohere.Client) ([]float64, error) {
-	res, err := co.Embed(cohere.EmbedOptions{
-		Model: "embed-english-light-v2.0",
-		Texts: []string{message},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res.Embeddings[0], nil
-}
+var host = "https://api.predictionguard.com"
+var apiKey = os.Getenv("PGKEY")
 
 // VectorizedChunk is a struct that holds a vectorized chunk.
 type VectorizedChunk struct {
-	Chunk  string    `json:"chunk"`
-	Vector []float64 `json:"vector"`
+	Id       int       `json:"id"`
+	Chunk    string    `json:"chunk"`
+	Vector   []float64 `json:"vector"`
+	Metadata string    `json:"metadata"`
 }
 
 // VectorizedChunks is a slice of vectorized chunks.
 type VectorizedChunks []VectorizedChunk
+
+func embed(imageLink string, text string) (*VectorizedChunk, error) {
+
+	logger := func(ctx context.Context, msg string, v ...any) {
+		s := fmt.Sprintf("msg: %s", msg)
+		log.Println(s)
+	}
+
+	cln := client.New(logger, host, apiKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var image client.ImageNetwork
+	if imageLink != "" {
+		imageParsed, err := client.NewImageNetwork(imageLink)
+		if err != nil {
+			return nil, fmt.Errorf("ERROR: %w", err)
+		}
+		image = imageParsed
+	}
+
+	input := []client.EmbeddingInput{
+		{
+			Text: text,
+		},
+	}
+	if imageLink != "" {
+		input[0].Image = image
+	}
+
+	resp, err := cln.Embedding(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("ERROR: %w", err)
+	}
+
+	return &VectorizedChunk{
+		Chunk:  text,
+		Vector: resp.Data[0].Embedding,
+	}, nil
+}
 
 // cosineSimilarity calculates the cosine similarity between two vectors.
 func cosineSimilarity(a []float64, b []float64) (cosine float64, err error) {
@@ -65,11 +101,11 @@ func cosineSimilarity(a []float64, b []float64) (cosine float64, err error) {
 }
 
 // search through the vectorized chunks to find the most similar chunk.
-func search(chunks VectorizedChunks, embedding []float64) (string, error) {
+func search(chunks VectorizedChunks, embedding VectorizedChunk) (string, error) {
 	outChunk := ""
 	var maxSimilarity float64 = 0.0
 	for _, c := range chunks {
-		distance, err := cosineSimilarity(c.Vector, embedding)
+		distance, err := cosineSimilarity(c.Vector, embedding.Vector)
 		if err != nil {
 			return "", err
 		}
@@ -82,17 +118,6 @@ func search(chunks VectorizedChunks, embedding []float64) (string, error) {
 }
 
 func main() {
-
-	// Connect to Cohere.
-	apiKey := os.Getenv("COHERE_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "COHERE_API_KEY not specified")
-		os.Exit(1)
-	}
-	co, err := cohere.CreateClient(apiKey)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Open the JSON file and load in the vectorized embeddings.
 	f, err := os.Open("../example2/chunks.json")
@@ -108,14 +133,14 @@ func main() {
 	}
 
 	// Embed a question for the RAG answer.
-	message := "What is the review process?"
-	embedding, err := embed(message, co)
+	message := "What do I need in order to respond to reviewers?"
+	embedding, err := embed("", message)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Search for the relevant chunk.
-	chunk, err := search(chunks, embedding)
+	chunk, err := search(chunks, *embedding)
 	if err != nil {
 		log.Fatal(err)
 	}

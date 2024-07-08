@@ -33,7 +33,14 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp, err := cln.Completions(ctx, client.Models.Hermes2ProMistral7B, "The best thing about gophers is: ", 100, 0.8)
+	input := client.CompletionInput{
+		Model:       client.Models.Hermes2ProLlama38B,
+		Prompt:      "The best thing about gophers is: ",
+		MaxTokens:   100,
+		Temperature: 0.75,
+	}
+
+	resp, err := cln.Completions(ctx, input)
 	if err != nil {
 		return fmt.Errorf("ERROR: %w", err)
 	}

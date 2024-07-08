@@ -14,7 +14,6 @@ import (
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/cohere-ai/cohere-go"
 	"github.com/predictionguard/go-client"
 )
 
@@ -24,34 +23,63 @@ var apiKey = os.Getenv("PGKEY")
 
 // qAPromptTemplate is a template for a question and answer prompt.
 func qAPromptTemplate(context, question string) string {
-	return fmt.Sprintf(`Read the context below and answer the question. If the question cannot be answered based on the context alone or the context does not explicitly say the answer to the question, respond "Sorry I had trouble answering this question, based on the information I found."
-
-Context: "%s"
+	return fmt.Sprintf(`Context: "%s"
 
 Question: "%s"
 `, context, question)
 }
 
-// embed vectorizes a user message/query.
-func embed(message string, co *cohere.Client) ([]float64, error) {
-	res, err := co.Embed(cohere.EmbedOptions{
-		Model: "embed-english-light-v2.0",
-		Texts: []string{message},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res.Embeddings[0], nil
-}
-
 // VectorizedChunk is a struct that holds a vectorized chunk.
 type VectorizedChunk struct {
-	Chunk  string    `json:"chunk"`
-	Vector []float64 `json:"vector"`
+	Id       int       `json:"id"`
+	Chunk    string    `json:"chunk"`
+	Vector   []float64 `json:"vector"`
+	Metadata string    `json:"metadata"`
 }
 
 // VectorizedChunks is a slice of vectorized chunks.
 type VectorizedChunks []VectorizedChunk
+
+func embed(imageLink string, text string) (*VectorizedChunk, error) {
+
+	logger := func(ctx context.Context, msg string, v ...any) {
+		//s := fmt.Sprintf("msg: %s", msg)
+		//log.Println(s)
+	}
+
+	cln := client.New(logger, host, apiKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var image client.ImageNetwork
+	if imageLink != "" {
+		imageParsed, err := client.NewImageNetwork(imageLink)
+		if err != nil {
+			return nil, fmt.Errorf("ERROR: %w", err)
+		}
+		image = imageParsed
+	}
+
+	input := []client.EmbeddingInput{
+		{
+			Text: text,
+		},
+	}
+	if imageLink != "" {
+		input[0].Image = image
+	}
+
+	resp, err := cln.Embedding(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("ERROR: %w", err)
+	}
+
+	return &VectorizedChunk{
+		Chunk:  text,
+		Vector: resp.Data[0].Embedding,
+	}, nil
+}
 
 // cosineSimilarity calculates the cosine similarity between two vectors.
 func cosineSimilarity(a []float64, b []float64) (cosine float64, err error) {
@@ -86,11 +114,11 @@ func cosineSimilarity(a []float64, b []float64) (cosine float64, err error) {
 }
 
 // search through the vectorized chunks to find the most similar chunk.
-func search(chunks VectorizedChunks, embedding []float64) (string, error) {
+func search(chunks VectorizedChunks, embedding VectorizedChunk) (string, error) {
 	outChunk := ""
 	var maxSimilarity float64 = 0.0
 	for _, c := range chunks {
-		distance, err := cosineSimilarity(c.Vector, embedding)
+		distance, err := cosineSimilarity(c.Vector, embedding.Vector)
 		if err != nil {
 			return "", err
 		}
@@ -117,19 +145,28 @@ func run(query, queryContext string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	input := []client.ChatMessage{
-		{
-			Role: client.Roles.User,
-			Content: qAPromptTemplate(
-				string(queryContext),
-				query,
-			),
+	input := client.ChatSSEInput{
+		Model: client.Models.Hermes2ProLlama38B,
+		Messages: []client.ChatInputMessage{
+			{
+				Role:    client.Roles.System,
+				Content: "Read the context provided by the user and answer their question. If the question cannot be answered based on the context alone or the context does not explicitly say the answer to the question, respond \"Sorry I had trouble answering this question, based on the information I found\".",
+			},
+			{
+				Role: client.Roles.User,
+				Content: qAPromptTemplate(
+					string(queryContext),
+					query,
+				),
+			},
 		},
+		MaxTokens:   1000,
+		Temperature: 0.3,
 	}
 
 	ch := make(chan client.ChatSSE, 1000)
 
-	err := cln.ChatSSE(ctx, client.Models.Hermes2ProMistral7B, input, 1000, 0.1, ch)
+	err := cln.ChatSSE(ctx, input, ch)
 	if err != nil {
 		return fmt.Errorf("ERROR: %w", err)
 	}
@@ -215,57 +252,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Connect to Cohere.
-	apiKey := os.Getenv("COHERE_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "COHERE_API_KEY not specified")
-		os.Exit(1)
-	}
-	co, err := cohere.CreateClient(apiKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Embed the website chunks.
 	vectorizedChunks := VectorizedChunks{}
-	if len(chunks) > 20 {
-
-		// Batch requests to cohere in batches of 20 or less chunks.
-		for i := 0; i < len(chunks); i += 20 {
-			end := i + 20
-			if end > len(chunks) {
-				end = len(chunks)
-			}
-			res, err := co.Embed(cohere.EmbedOptions{
-				Model: "embed-english-light-v2.0",
-				Texts: chunks[i:end],
-			})
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			// Add the vectorized chunk to the vectorized chunks.
-			for j, chunk := range chunks[i:end] {
-				vectorizedChunks = append(vectorizedChunks, VectorizedChunk{
-					Chunk:  chunk,
-					Vector: res.Embeddings[j],
-				})
-			}
-		}
-	} else {
-		res, err := co.Embed(cohere.EmbedOptions{
-			Model: "embed-english-light-v2.0",
-			Texts: chunks,
-		})
+	for i, chunk := range chunks {
+		fmt.Printf("Embedding chunk %d of %d\n", i+1, len(chunks))
+		vectorizedChunk, err := embed("", chunk)
 		if err != nil {
 			log.Fatal(err)
 		}
-		for j, chunk := range chunks {
-			vectorizedChunks = append(vectorizedChunks, VectorizedChunk{
-				Chunk:  chunk,
-				Vector: res.Embeddings[j],
-			})
-		}
+		vectorizedChunks = append(vectorizedChunks, *vectorizedChunk)
+		vectorizedChunks[i].Id = i
+		vectorizedChunks[i].Metadata = chunk
 	}
 
 	// Start a cycle of listening for questions and responding to the questions.
@@ -284,13 +281,13 @@ func main() {
 		}
 
 		// Embed a question for the RAG answer.
-		embedding, err := embed(input, co)
+		embedding, err := embed("", input)
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		// Search for the relevant chunk.
-		chunk, err := search(vectorizedChunks, embedding)
+		chunk, err := search(vectorizedChunks, *embedding)
 		if err != nil {
 			log.Fatal(err)
 		}

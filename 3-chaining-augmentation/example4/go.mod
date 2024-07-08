@@ -4,7 +4,7 @@ go 1.22.3
 
 require (
 	github.com/cohere-ai/cohere-go v0.2.0
-	github.com/predictionguard/go-client v0.4.0
+	github.com/predictionguard/go-client v0.13.0
 )
 
 require (

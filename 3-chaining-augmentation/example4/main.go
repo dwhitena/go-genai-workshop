@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cohere-ai/cohere-go"
 	"github.com/predictionguard/go-client"
 )
 
@@ -22,34 +21,63 @@ var apiKey = os.Getenv("PGKEY")
 
 // qAPromptTemplate is a template for a question and answer prompt.
 func qAPromptTemplate(context, question string) string {
-	return fmt.Sprintf(`Read the context below and answer the question. If the question cannot be answered based on the context alone or the context does not explicitly say the answer to the question, respond "Sorry I had trouble answering this question, based on the information I found."
-
-Context: "%s"
+	return fmt.Sprintf(`Context: "%s"
 
 Question: "%s"
 `, context, question)
 }
 
-// embed vectorizes a user message/query.
-func embed(message string, co *cohere.Client) ([]float64, error) {
-	res, err := co.Embed(cohere.EmbedOptions{
-		Model: "embed-english-light-v2.0",
-		Texts: []string{message},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return res.Embeddings[0], nil
-}
-
 // VectorizedChunk is a struct that holds a vectorized chunk.
 type VectorizedChunk struct {
-	Chunk  string    `json:"chunk"`
-	Vector []float64 `json:"vector"`
+	Id       int       `json:"id"`
+	Chunk    string    `json:"chunk"`
+	Vector   []float64 `json:"vector"`
+	Metadata string    `json:"metadata"`
 }
 
 // VectorizedChunks is a slice of vectorized chunks.
 type VectorizedChunks []VectorizedChunk
+
+func embed(imageLink string, text string) (*VectorizedChunk, error) {
+
+	logger := func(ctx context.Context, msg string, v ...any) {
+		//s := fmt.Sprintf("msg: %s", msg)
+		//log.Println(s)
+	}
+
+	cln := client.New(logger, host, apiKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var image client.ImageNetwork
+	if imageLink != "" {
+		imageParsed, err := client.NewImageNetwork(imageLink)
+		if err != nil {
+			return nil, fmt.Errorf("ERROR: %w", err)
+		}
+		image = imageParsed
+	}
+
+	input := []client.EmbeddingInput{
+		{
+			Text: text,
+		},
+	}
+	if imageLink != "" {
+		input[0].Image = image
+	}
+
+	resp, err := cln.Embedding(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("ERROR: %w", err)
+	}
+
+	return &VectorizedChunk{
+		Chunk:  text,
+		Vector: resp.Data[0].Embedding,
+	}, nil
+}
 
 // cosineSimilarity calculates the cosine similarity between two vectors.
 func cosineSimilarity(a []float64, b []float64) (cosine float64, err error) {
@@ -84,11 +112,11 @@ func cosineSimilarity(a []float64, b []float64) (cosine float64, err error) {
 }
 
 // search through the vectorized chunks to find the most similar chunk.
-func search(chunks VectorizedChunks, embedding []float64) (string, error) {
+func search(chunks VectorizedChunks, embedding VectorizedChunk) (string, error) {
 	outChunk := ""
 	var maxSimilarity float64 = 0.0
 	for _, c := range chunks {
-		distance, err := cosineSimilarity(c.Vector, embedding)
+		distance, err := cosineSimilarity(c.Vector, embedding.Vector)
 		if err != nil {
 			return "", err
 		}
@@ -115,19 +143,28 @@ func run(query, queryContext string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	input := []client.ChatMessage{
-		{
-			Role: client.Roles.User,
-			Content: qAPromptTemplate(
-				string(queryContext),
-				query,
-			),
+	input := client.ChatSSEInput{
+		Model: client.Models.Hermes2ProLlama38B,
+		Messages: []client.ChatInputMessage{
+			{
+				Role:    client.Roles.System,
+				Content: "Read the context provided by the user and answer their question. If the question cannot be answered based on the context alone or the context does not explicitly say the answer to the question, respond \"Sorry I had trouble answering this question, based on the information I found\".",
+			},
+			{
+				Role: client.Roles.User,
+				Content: qAPromptTemplate(
+					string(queryContext),
+					query,
+				),
+			},
 		},
+		MaxTokens:   1000,
+		Temperature: 0.3,
 	}
 
 	ch := make(chan client.ChatSSE, 1000)
 
-	err := cln.ChatSSE(ctx, client.Models.Hermes2ProMistral7B, input, 1000, 0.1, ch)
+	err := cln.ChatSSE(ctx, input, ch)
 	if err != nil {
 		return fmt.Errorf("ERROR: %w", err)
 	}
@@ -142,17 +179,6 @@ func run(query, queryContext string) error {
 }
 
 func main() {
-
-	// Connect to Cohere.
-	apiKey := os.Getenv("COHERE_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "COHERE_API_KEY not specified")
-		os.Exit(1)
-	}
-	co, err := cohere.CreateClient(apiKey)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Open the JSON file and load in the vectorized embeddings.
 	f, err := os.Open("../example2/chunks.json")
@@ -183,13 +209,13 @@ func main() {
 		}
 
 		// Embed a question for the RAG answer.
-		embedding, err := embed(input, co)
+		embedding, err := embed("", input)
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		// Search for the relevant chunk.
-		chunk, err := search(chunks, embedding)
+		chunk, err := search(chunks, *embedding)
 		if err != nil {
 			log.Fatal(err)
 		}

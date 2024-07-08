@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,10 +9,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	cohere "github.com/cohere-ai/cohere-go"
+	"github.com/predictionguard/go-client"
 )
+
+var host = "https://api.predictionguard.com"
+var apiKey = os.Getenv("PGKEY")
 
 // characterTextSplitter takes in a string and splits the string into
 // chunks of a given size (split on whitespace) with an overlap of a
@@ -76,12 +81,55 @@ func websiteChunks(website string, start string, end string) ([]string, error) {
 
 // VectorizedChunk is a struct that holds a vectorized chunk.
 type VectorizedChunk struct {
-	Chunk  string    `json:"chunk"`
-	Vector []float64 `json:"vector"`
+	Id       int       `json:"id"`
+	Chunk    string    `json:"chunk"`
+	Vector   []float64 `json:"vector"`
+	Metadata string    `json:"metadata"`
 }
 
 // VectorizedChunks is a slice of vectorized chunks.
 type VectorizedChunks []VectorizedChunk
+
+func embed(imageLink string, text string) (*VectorizedChunk, error) {
+
+	logger := func(ctx context.Context, msg string, v ...any) {
+		s := fmt.Sprintf("msg: %s", msg)
+		log.Println(s)
+	}
+
+	cln := client.New(logger, host, apiKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var image client.ImageNetwork
+	if imageLink != "" {
+		imageParsed, err := client.NewImageNetwork(imageLink)
+		if err != nil {
+			return nil, fmt.Errorf("ERROR: %w", err)
+		}
+		image = imageParsed
+	}
+
+	input := []client.EmbeddingInput{
+		{
+			Text: text,
+		},
+	}
+	if imageLink != "" {
+		input[0].Image = image
+	}
+
+	resp, err := cln.Embedding(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("ERROR: %w", err)
+	}
+
+	return &VectorizedChunk{
+		Chunk:  text,
+		Vector: resp.Data[0].Embedding,
+	}, nil
+}
 
 func main() {
 
@@ -91,43 +139,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Connect to Cohere.
-	apiKey := os.Getenv("COHERE_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "COHERE_API_KEY not specified")
-		os.Exit(1)
-	}
-	co, err := cohere.CreateClient(apiKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Embed the website chunks.
 	vectorizedChunks := VectorizedChunks{}
-	if len(chunks) > 20 {
-
-		// Batch requests to cohere in batches of 20 or less chunks.
-		for i := 0; i < len(chunks); i += 20 {
-			end := i + 20
-			if end > len(chunks) {
-				end = len(chunks)
-			}
-			res, err := co.Embed(cohere.EmbedOptions{
-				Model: "embed-english-light-v2.0",
-				Texts: chunks[i:end],
-			})
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			// Add the vectorized chunk to the vectorized chunks.
-			for j, chunk := range chunks[i:end] {
-				vectorizedChunks = append(vectorizedChunks, VectorizedChunk{
-					Chunk:  chunk,
-					Vector: res.Embeddings[j],
-				})
-			}
+	for i, chunk := range chunks {
+		fmt.Printf("Embedding chunk %d of %d\n", i+1, len(chunks))
+		vectorizedChunk, err := embed("", chunk)
+		if err != nil {
+			log.Fatal(err)
 		}
+		vectorizedChunks = append(vectorizedChunks, *vectorizedChunk)
+		vectorizedChunks[i].Id = i
+		vectorizedChunks[i].Metadata = chunk
 	}
 
 	// Marshal the chunks.

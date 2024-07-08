@@ -1,6 +1,6 @@
-# Go Generative AI Webinar Materials
+# Go Generative AI Workshop Materials
 
-This repo includes the materials for Go GenAI webinars. The materials were prepared by Daniel Whitenack for live attendees. However, others might benefit from them as they build generative AI applications with Go. 
+This repo includes the materials for Go GenAI workshops. The materials were prepared by Daniel Whitenack for live attendees. However, others might benefit from them as they build generative AI applications with Go. 
 
 ## Agenda
 

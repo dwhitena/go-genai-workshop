@@ -40,7 +40,14 @@ Write a Go program that prints out random numbers.<|im_end|>
 <|im_start|>assistant<|im_end|>
 `
 
-	resp, err := cln.Completions(ctx, client.Models.Hermes2ProMistral7B, prompt, 1000, 0.1)
+	input := client.CompletionInput{
+		Model:       client.Models.Hermes2ProLlama38B,
+		Prompt:      prompt,
+		MaxTokens:   1000,
+		Temperature: 0.3,
+	}
+
+	resp, err := cln.Completions(ctx, input)
 	if err != nil {
 		return fmt.Errorf("ERROR: %w", err)
 	}
