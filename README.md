@@ -5,7 +5,7 @@ This repo includes the materials for Go GenAI workshops. The materials were prep
 ## Agenda
 
 0. Introductions, logistics
-1. [Accessing LLMS](accessing-llms)
-2. [Prompt Engineering](prompt-engineering)
-4. [Chaining, Retrieval Augmentation](retrieval-augmentation)
+1. [Accessing LLMS](1-accessing-llms)
+2. [Prompt Engineering](2-prompt-engineering)
+4. [Chaining, Retrieval Augmentation](3-chaining-augmentation)
 5. Conclusions
